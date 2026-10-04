@@ -1,0 +1,39 @@
+name: publish
+
+# Runs on a version tag. Uses PyPI trusted publishing: no token is stored anywhere.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests   # engine tests; Graphiti tests run in ci.yml
+      - name: Tag matches the package version
+        run: test "${GITHUB_REF_NAME#v}" = "$(python -c 'import sys; sys.path.insert(0, "src"); import vercy_graphiti; print(vercy_graphiti.__version__)')"
+      - run: pip install --quiet build && python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

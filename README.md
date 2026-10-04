@@ -31,6 +31,11 @@ the same Graphiti graph.
 | **Cases passed** | **2 of 8** | **5 of 8** | **5 of 8** | **8 of 8** |
 | **Restricted content exposed** | **3** | **3** | **0** | **0** |
 
+The table is the embedded-Kuzu run. CI repeats it on Neo4j, Graphiti's primary backend: the three
+governed columns are identical (5, 5 and 8 of 8; 3, 3 and 0 exposed), and the top-hit column passes
+3 of 8 with 3 exposed, on different cases, because its answer depends on ranking. On both backends
+every exposure in the top-hit column is in the chosen answer itself, not further down the list.
+
 - **Retrieval, top hit** is a host policy, not Graphiti behaviour: `search_` with Graphiti's own
   bitemporal filter, the top hit taken as the answer and every returned fact forwarded to the model.
   Graphiti does not claim to enforce ownership or disclosure; this column shows what a host gets
