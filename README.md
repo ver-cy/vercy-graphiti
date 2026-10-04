@@ -50,12 +50,15 @@ every exposure in the top-hit column is in the chosen answer itself, not further
 "Exposed" means one of the case's listed withheld strings appears in the payload that arm would forward.
 The listed strings are the oracle; this is not a proof that nothing else could leak.
 
-Reproduce, with no API key and no network after install:
+Reproduce, with no API key and no network after install (Python 3.10 to 3.13):
 
 ```bash
-pip install "vercy-graphiti[offline]"
+git clone --branch v0.1.0 https://github.com/ver-cy/vercy-graphiti && cd vercy-graphiti
+pip install ".[offline]"
 python bench/run.py
 ```
+
+The adapter alone is `pip install vercy-graphiti`.
 
 The run writes `bench/result.json`, including the ranked candidates the top-hit arm saw. The top-hit
 arm reads a ranked list from `search_`; the three governed arms read every edge of the concept node.
