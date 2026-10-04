@@ -5,13 +5,16 @@ validity, applicability, supersession, precedence, then disclosure last, with
 stable reason codes and a disclosure boundary that never names a withheld record.
 
 Everything about who wrote a record and who owns a concept comes from the host
-(`Host`), never from the record itself. A record's own `concept_owner` is only a
-claim; it is checked against the host's ownership register.
+(`Host`, and the `written_by` the host attests), never from the record itself. A
+record's own `concept_owner` is only a claim.
+
+The caller must pass every record the store holds for the concept. Deciding over a
+ranked subset can drop the record that should govern the answer.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Any, Iterable, Optional
 
 # outcomes
@@ -23,11 +26,13 @@ VALIDITY_UNKNOWN = "validity_unknown"
 OUT_OF_SCOPE = "out_of_scope"
 SUPERSEDED = "superseded"
 UNAUTHORIZED_SUPERSESSION = "unauthorized_supersession"
+SUPERSESSION_CYCLE = "supersession_cycle"
 UNAUTHORIZED_PRECEDENCE = "unauthorized_precedence"
 CONFLICT_UNRESOLVED = "conflict_unresolved"
 NO_AUTHORITATIVE_RECORD = "no_authoritative_record"
 NOT_RELEASED = "not_released"
 RESTRICTED_WITHOUT_RELEASE = "restricted_without_release"
+INTEGRITY_FAILED = "integrity_failed"
 
 POLICIES = ("latest_valid_from", "abstain")
 RESTRICTED_MARKERS = ("release_to", "classification", "confidential", "restricted")
@@ -42,15 +47,17 @@ def _tuple(value: Any) -> tuple[str, ...]:
     if _empty(value):
         return ()
     if isinstance(value, (list, tuple, set)):
-        return tuple(str(v) for v in value)
+        return tuple(dict.fromkeys(str(v) for v in value))     # ordered, de-duplicated
     return (str(value),)
 
 
 def _date(value: Any) -> Optional[date]:
     if _empty(value):
         return None
+    if isinstance(value, datetime):
+        return value.date()
     if isinstance(value, date):
-        return value if not hasattr(value, "date") else value.date()  # datetime -> date
+        return value
     return date.fromisoformat(str(value)[:10])
 
 
@@ -72,6 +79,11 @@ class Fact:
     written_by: Optional[str] = None
     claims_priority: bool = False
     source: Optional[str] = None
+
+    @property
+    def validity_known(self) -> bool:
+        """Both ends stated: valid_from has a date and the valid_to key is present (null = open)."""
+        return self.valid_from is not None and self.has_valid_to
 
     @classmethod
     def from_record(cls, record: dict[str, Any], written_by: Optional[str] = None) -> "Fact":
@@ -144,12 +156,18 @@ def visible(fact: Fact, caller: Caller) -> bool:
 
 
 def decide(facts: Iterable[Fact], *, concept: str, caller: Caller, as_of: date,
-           host: Host, scope: Iterable[str] = ()) -> Decision:
-    """Answer one concept for one caller at one date. Steps 1 to 5 of the contract, in order."""
+           host: Host, scope: Iterable[str] = (), integrity_failures: int = 0) -> Decision:
+    """Answer one concept for one caller at one date. Steps 1 to 5 of the contract, in order.
+
+    `facts` must be every record the store holds for the concept. `integrity_failures` counts
+    records the store holds but whose envelope failed verification; they take no part.
+    """
     facts = [f for f in facts if f.concept == concept]
     scope = set(scope)
     owner = host.owners.get(concept)
-    raw_reasons: list[tuple[str, Optional[Fact]]] = []
+    raw: list[tuple[str, Optional[Fact]]] = []
+    if integrity_failures:
+        raw.append((INTEGRITY_FAILED, None))
 
     def authoritative(f: Fact) -> bool:
         return owner is not None and f.written_by == owner
@@ -157,39 +175,45 @@ def decide(facts: Iterable[Fact], *, concept: str, caller: Caller, as_of: date,
     # 1. validity
     kept = []
     for f in facts:
-        if f.valid_from is None or not f.has_valid_to:
-            raw_reasons.append((VALIDITY_UNKNOWN, f))
+        if not f.validity_known:
+            raw.append((VALIDITY_UNKNOWN, f))
             kept.append(f)
         elif f.valid_from <= as_of and (f.valid_to is None or as_of <= f.valid_to):
             kept.append(f)
         else:
-            raw_reasons.append((EXPIRED, f))
+            raw.append((EXPIRED, f))
 
     # 2. applicability (exact match on host-supplied scope values)
     applicable = []
     for f in kept:
         if scope & set(f.does_not_apply_to) or (f.applies_to and not scope & set(f.applies_to)):
-            raw_reasons.append((OUT_OF_SCOPE, f))
+            raw.append((OUT_OF_SCOPE, f))
         else:
             applicable.append(f)
     if not applicable:
-        return _finish(Decision(EMPTY), raw_reasons, caller)
+        return _finish(Decision(EMPTY), raw, caller, applicable)
 
-    # 3. supersession, only from authoritative and valid writers; mutual cancels out
+    # 3. supersession: only an authoritative record with known validity may supersede,
+    #    and edges inside a cycle cancel out (mutual supersession is a conflict, not a deletion)
     by_id = {f.record_id: f for f in applicable}
-    dropped: set[str] = set()
+    edges: dict[str, set[str]] = {}
     for f in applicable:
         for target in f.supersedes:
-            if target not in by_id:
+            if target not in by_id or target == f.record_id:
                 continue
             if not authoritative(f):
-                raw_reasons.append((UNAUTHORIZED_SUPERSESSION, f))
-                continue
-            if f.record_id in by_id[target].supersedes and authoritative(by_id[target]):
-                continue          # two authoritative records supersede each other: a conflict
-            dropped.add(target)
-    for rid in dropped:
-        raw_reasons.append((SUPERSEDED, by_id[rid]))
+                raw.append((UNAUTHORIZED_SUPERSESSION, f))
+            elif f.validity_known:
+                edges.setdefault(f.record_id, set()).add(target)
+    dropped: set[str] = set()
+    for src, targets in edges.items():
+        for target in targets:
+            if _reaches(edges, target, src):
+                raw.append((SUPERSESSION_CYCLE, by_id[src]))
+            else:
+                dropped.add(target)
+    for rid in sorted(dropped):
+        raw.append((SUPERSEDED, by_id[rid]))
     remaining = [f for f in applicable if f.record_id not in dropped]
 
     # 4. precedence: authoritative records outrank everything else
@@ -197,61 +221,71 @@ def decide(facts: Iterable[Fact], *, concept: str, caller: Caller, as_of: date,
     if auth:
         for f in remaining:
             if not authoritative(f) and f.claims_priority:
-                raw_reasons.append((UNAUTHORIZED_PRECEDENCE, f))
+                raw.append((UNAUTHORIZED_PRECEDENCE, f))
         pool = auth
     else:
-        raw_reasons.append((NO_AUTHORITATIVE_RECORD, None))
+        raw.append((NO_AUTHORITATIVE_RECORD, None))
         pool = remaining
     winner, conflict = _resolve(pool, host.policy)
 
     # 5. disclosure, last, with no fallback to a lower-ranked record
     if winner is not None:
         if visible(winner, caller):
-            return _finish(Decision(ANSWERED, answer=winner), raw_reasons, caller)
-        code = NOT_RELEASED if winner.release_to else RESTRICTED_WITHOUT_RELEASE
-        raw_reasons.append((code, winner))
-        return _finish(Decision(REFUSED), raw_reasons, caller)
-    raw_reasons.append((CONFLICT_UNRESOLVED, None))
+            return _finish(Decision(ANSWERED, answer=winner), raw, caller, applicable)
+        raw.append((NOT_RELEASED if winner.release_to else RESTRICTED_WITHOUT_RELEASE, winner))
+        return _finish(Decision(REFUSED), raw, caller, applicable)
+    raw.append((CONFLICT_UNRESOLVED, None))
     if all(visible(f, caller) for f in conflict):
         return _finish(Decision(ABSTAINED, conflict=sorted(conflict, key=lambda f: f.record_id)),
-                       raw_reasons, caller)
+                       raw, caller, applicable)
     for f in conflict:
         if not visible(f, caller):
-            raw_reasons.append((NOT_RELEASED if f.release_to else RESTRICTED_WITHOUT_RELEASE, f))
-    return _finish(Decision(REFUSED), raw_reasons, caller)
+            raw.append((NOT_RELEASED if f.release_to else RESTRICTED_WITHOUT_RELEASE, f))
+    return _finish(Decision(REFUSED), raw, caller, applicable)
+
+
+def _reaches(edges: dict[str, set[str]], start: str, goal: str) -> bool:
+    stack, seen = [start], set()
+    while stack:
+        node = stack.pop()
+        if node == goal:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(edges.get(node, ()))
+    return False
 
 
 def _resolve(pool: list[Fact], policy: str) -> tuple[Optional[Fact], list[Fact]]:
-    """One winner, or the records that remain in conflict."""
-    values = {f.value for f in pool}
-    known = [f for f in pool if f.valid_from is not None]
-    if len(values) == 1:
-        ranked = sorted(known or pool, key=lambda f: (f.valid_from or date.min, f.record_id))
+    """One winner, or the records that remain in conflict. Records of unknown validity lose
+    every tie: they contest only when no record of known validity is left."""
+    contest = [f for f in pool if f.validity_known] or pool
+    if len({f.value for f in contest}) == 1:
+        ranked = sorted(contest, key=lambda f: (f.valid_from or date.min, f.record_id))
         return ranked[-1], []
-    if policy == "latest_valid_from" and known:
-        latest = max(f.valid_from for f in known)
-        top = [f for f in known if f.valid_from == latest]
+    dated = [f for f in contest if f.valid_from is not None]
+    if policy == "latest_valid_from" and dated:
+        latest = max(f.valid_from for f in dated)
+        top = [f for f in dated if f.valid_from == latest]
         if len({f.value for f in top}) == 1:
             return sorted(top, key=lambda f: f.record_id)[-1], []
         return None, top
-    return None, pool
+    return None, contest
 
 
-def _finish(decision: Decision, raw: list[tuple[str, Optional[Fact]]], caller: Caller) -> Decision:
-    """Reasons name a record only when the caller may see it; the rest are counted."""
-    seen, anonymous = set(), {}
-    withheld_ids = set()
+def _finish(decision: Decision, raw: list[tuple[str, Optional[Fact]]], caller: Caller,
+            relevant: list[Fact]) -> Decision:
+    """Reasons name a record only when the caller may see it. A reason that concerns a withheld
+    record crosses as its code alone, once, with no count. `withheld_records` is the number of
+    relevant records (valid and applicable) the caller may not see."""
+    seen: set[tuple[str, Optional[str]]] = set()
     for code, f in raw:
-        if f is not None and not visible(f, caller):
-            withheld_ids.add(f.record_id)
-            anonymous[code] = anonymous.get(code, 0) + 1
-            continue
-        key = (code, f.record_id if f else None)
+        hidden = f is not None and not visible(f, caller)
+        key = (code, None if (f is None or hidden) else f.record_id)
         if key in seen:
             continue
         seen.add(key)
-        decision.reasons.append({"code": code, "record_id": f.record_id if f else None})
-    for code, count in sorted(anonymous.items()):
-        decision.reasons.append({"code": code, "record_id": None, "count": count})
-    decision.withheld = len(withheld_ids)
+        decision.reasons.append({"code": code, "record_id": key[1]})
+    decision.withheld = sum(1 for f in relevant if not visible(f, caller))
     return decision

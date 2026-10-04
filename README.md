@@ -3,32 +3,46 @@
 Graphiti already keeps the time half of a governed fact: every edge carries `valid_at` and
 `invalid_at`. This package adds the other half, as edge attributes and a read path:
 
-- **who owns the concept**, checked against the host's ownership register, with the writer of each
-  edge attested by a host-keyed HMAC so a record cannot make itself authoritative;
-- **which record wins** when records disagree, by a written rule, or an explicit abstention;
+- **who owns the concept**, checked against the host's ownership register. Each edge carries a signed
+  envelope: the host signs the group, the edge id, the record and the writer with its own key, so a
+  record cannot make itself authoritative, move to another concept, or shed its `release_to`.
+- **which record wins** when records disagree, by a written rule, or an explicit abstention.
 - **who may see it**, applied last, with no fallback to an older value and nothing from a withheld
   record in the payload.
 
 It implements the [Vercy enforcement contract](https://github.com/ver-cy/vercy-py/blob/main/ENFORCEMENT-CONTRACT.md),
-draft 0.3. Graphiti itself is unchanged: the package uses its public `EntityEdge` and `search_` APIs.
+draft 0.3, using only Graphiti's public `EntityEdge`, `EntityNode` and `search_` APIs.
 
 ## Result
 
-Eight adversarial cases, each with a fixed expected outcome. Three arms over the same Graphiti graph:
-Graphiti's own retrieval with its own bitemporal filter; the governed read with the overlay fields
-stripped; the governed read with the fields.
+Eight adversarial cases written from the contract, each with a fixed expected outcome. Four arms over
+the same Graphiti graph.
 
-| Case | Graphiti native | Governed, fields stripped | Governed |
-|---|---|---|---|
-| Forged authority | wrong answer | wrong answer | pass |
-| Forged supersession | wrong answer | wrong answer | pass |
-| Unauthorized retrieval | **leak** | **leak** | pass |
-| No fallback to a superseded value | **leak** | **leak** | pass |
-| Hidden side of a conflict | **leak** | **leak** | pass |
-| Unresolved conflict | silent pick | pass | pass |
-| Expired truth | pass | pass | pass |
-| Laundered fact | pass | wrong answer | pass |
-| **Total** | **2 of 8, 3 leaks** | **2 of 8, 3 leaks** | **8 of 8, 0 leaks** |
+| Case | Retrieval, top hit | Without fields | Without attestation | Governed |
+|---|---|---|---|---|
+| Forged authority | other answer | pass | other answer | pass |
+| Forged supersession | other answer | pass | other answer | pass |
+| Unauthorized retrieval | exposed | exposed | pass | pass |
+| No fallback to a superseded value | exposed | exposed | pass | pass |
+| Hidden side of a conflict | exposed | exposed | pass | pass |
+| Unresolved conflict | picks one | pass | pass | pass |
+| Expired truth | pass | pass | pass | pass |
+| Laundered fact | pass | pass | other answer | pass |
+| **Cases passed** | **2 of 8** | **5 of 8** | **5 of 8** | **8 of 8** |
+| **Restricted content exposed** | **3** | **3** | **0** | **0** |
+
+- **Retrieval, top hit** is a host policy, not Graphiti behaviour: `search_` with Graphiti's own
+  bitemporal filter, the top hit taken as the answer and every returned fact forwarded to the model.
+  Graphiti does not claim to enforce ownership or disclosure; this column shows what a host gets
+  without something that does.
+- **Without fields** keeps the host's ownership register and writer attestation and removes the overlay
+  fields. Attestation alone settles the authority cases and exposes restricted content.
+- **Without attestation** keeps the fields and drops the writer. The fields alone stop the exposure and
+  lose the authority cases.
+- Neither half is enough on its own. Both together pass all eight.
+
+"Exposed" means one of the case's listed withheld strings appears in the payload that arm would forward.
+The listed strings are the oracle; this is not a proof that nothing else could leak.
 
 Reproduce, with no API key and no network after install:
 
@@ -37,17 +51,9 @@ pip install "vercy-graphiti[offline]"
 python bench/run.py
 ```
 
-Read this table for what it is:
-
-- **It is a conformance fixture, not a quality benchmark.** We wrote the cases from the contract.
-  Graphiti does not claim to enforce ownership or disclosure, so its native column shows what a host
-  gets without these fields, not a defect in Graphiti.
-- **Ranking matters for the native column only.** The harness uses a deterministic hashing embedder
-  so the run is reproducible. With a real embedder the native top hit can change, for example on
-  "laundered fact". The governed column does not depend on ranking, only on which records retrieval
-  returns.
-- **One retrieval path is covered**: `Graphiti.search_` with the edge RRF recipe. Graph walks,
-  `get_by_uuid`, episode reads and community summaries are not filtered by this package.
+The run writes `bench/result.json`, including the ranked candidates the top-hit arm saw. It uses a
+deterministic hashing embedder, so the top-hit column can change with a real embedder. The governed
+columns cannot: they load every edge of the concept node and do not depend on ranking.
 
 ## Use
 
@@ -64,22 +70,24 @@ await gg.write({"record_id": "ARR-1", "concept": "arr-definition",
                 "valid_from": "2026-04-01", "valid_to": None, "source": "FIN-POL-07"},
                written_by="finance")
 
-decision = await gg.ask("What does ARR mean?", concept="arr-definition",
+decision = await gg.ask(concept="arr-definition",
                         caller=Caller.of("analyst", ["staff"]), as_of=date(2026, 9, 1))
 decision.payload()   # outcome, answer, reason codes; safe to give to a model
 ```
 
 Outcomes are `answered`, `abstained`, `refused` or `empty`, with reason codes such as
-`unauthorized_precedence`, `superseded`, `not_released` and `expired`. A refusal says how many records
-were withheld and why, never which ones.
+`unauthorized_precedence`, `superseded`, `not_released`, `expired` and `integrity_failed`. A refusal
+says how many relevant records were withheld and which rule applied, never which records.
 
-The engine in `vercy_graphiti.enforce` has no dependencies and no Graphiti import; it can sit over any
-store that returns candidate records.
+**What is governed.** Only `ask(...).payload()`. Anything else a host exposes from the same graph
+(search results, graph walks, `get_by_uuid`, episodes, community summaries) is not filtered by this
+package. The engine in `vercy_graphiti.enforce` has no dependencies and no Graphiti import; it can sit
+over any store that can return every record for a concept.
 
 ## Notes for Graphiti on Kuzu
 
-Two things the offline harness works around, both in graphiti-core 0.30.2: the Kuzu driver creates
-its schema but not its full-text indices, so `search_` fails until they are created; and
+Two things the offline harness works around in graphiti-core 0.30.2: the Kuzu driver creates its
+schema but not its full-text indices, so `search_` fails until they are created; and
 `graphiti_core.llm_client` imports `httpx`, which the package does not declare.
 
 Apache-2.0. No telemetry: the harness sets `GRAPHITI_TELEMETRY_ENABLED=false`, and this package sends

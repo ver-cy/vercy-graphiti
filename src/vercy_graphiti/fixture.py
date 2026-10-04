@@ -39,10 +39,15 @@ def load(path: str | Path) -> list[Case]:
     return cases
 
 
-def score(case: Case, outcome: str, answer_id: Optional[str], payload: Any) -> dict[str, Any]:
-    """Correct outcome and answer, and zero bytes of withheld content anywhere in the payload."""
+def score(case: Case, outcome: str, answer_id: Optional[str], payload: Any,
+          conflict_ids: Optional[list[str]] = None) -> dict[str, Any]:
+    """Correct outcome, answer and conflict membership, and none of the case's listed
+    withheld strings anywhere in the payload. The listed strings are the oracle; this is
+    not a proof that nothing else could leak."""
     text = json.dumps(payload, ensure_ascii=False, default=str)
     leaked = [s for s in case.expect.get("forbidden", []) if s in text]
     correct = outcome == case.expect["outcome"] and answer_id == case.expect.get("record_id")
+    if "conflict" in case.expect:
+        correct = correct and sorted(conflict_ids or []) == sorted(case.expect["conflict"])
     return {"case": case.id, "outcome": outcome, "answer": answer_id, "correct": correct,
             "leaked": leaked, "pass": correct and not leaked}

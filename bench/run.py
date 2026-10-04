@@ -1,6 +1,14 @@
-"""Adversarial run on Graphiti: native, governed without the fields, governed with them.
+"""Adversarial conformance run on Graphiti.
 
     python bench/run.py                     # prints the table, writes bench/result.json
+
+Arms, all over the same Graphiti graph:
+  retrieval-top1             search_ with Graphiti's own time filter; the harness takes the top hit
+                             as the answer and forwards every returned fact. A host policy, not
+                             something Graphiti claims to do.
+  governed-without-fields    the governed read, overlay fields removed, attestation kept
+  governed-without-attest    the governed read, fields kept, writer unknown
+  governed                   the governed read
 
 Every case gets a fresh in-memory Graphiti (Kuzu). No LLM, no network, no telemetry.
 """
@@ -20,42 +28,51 @@ from vercy_graphiti.fixture import load, score  # noqa: E402
 from vercy_graphiti.offline import make_graphiti  # noqa: E402
 from vercy_graphiti.store import GovernedGraphiti  # noqa: E402
 
-KEY = b"vercy-bench-host-key"   # a fixed key: the run must be reproducible byte for byte
-ARMS = ("graphiti-native", "governed-without-fields", "governed")
+KEY = b"vercy-bench-host-key"   # a fixed key: the run must be reproducible
+ARMS = ("retrieval-top1", "governed-without-fields", "governed-without-attest", "governed")
+
+
+def judged(case, decision):
+    return score(case, decision.outcome, decision.answer.record_id if decision.answer else None,
+                 decision.payload(), [f.record_id for f in decision.conflict])
 
 
 async def run_case(case) -> dict:
     gg = GovernedGraphiti(make_graphiti(), host=case.host, key=KEY, group_id="bench")
     for written_by, record in case.records:
         await gg.write(record, written_by=written_by)
+    kw = dict(concept=case.concept, caller=case.caller, as_of=case.as_of)
 
-    answer, payload = await gg.ask_native(case.question, concept=case.concept, as_of=case.as_of)
-    native = score(case, "answered" if answer else "empty", answer, payload)
-
-    d = await gg.ask_stripped(case.question, concept=case.concept, caller=case.caller, as_of=case.as_of)
-    stripped = score(case, d.outcome, d.answer.record_id if d.answer else None, d.payload())
-
-    d = await gg.ask(case.question, concept=case.concept, caller=case.caller, as_of=case.as_of)
-    governed = score(case, d.outcome, d.answer.record_id if d.answer else None, d.payload())
+    answer, ranked = await gg.retrieve_top1(case.question, concept=case.concept, as_of=case.as_of)
+    row = {"case": case.id, "expect": case.expect,
+           "retrieval-top1": {**score(case, "answered" if answer else "empty", answer, ranked), "ranked": ranked},
+           "governed-without-fields": judged(case, await gg.ask_without_fields(**kw)),
+           "governed-without-attest": judged(case, await gg.ask_without_attestation(**kw))}
+    d = await gg.ask(**kw)
+    governed = judged(case, d)
     governed["reasons"] = sorted({r["code"] for r in d.reasons})
     governed["reasons_expected_present"] = all(r in governed["reasons"] for r in case.expect["reasons"])
     governed["pass"] = governed["pass"] and governed["reasons_expected_present"]
-    return {"case": case.id, "expect": case.expect, "graphiti-native": native,
-            "governed-without-fields": stripped, "governed": governed}
+    row["governed"] = governed
+    return row
 
 
 async def main() -> int:
     cases = load(ROOT / "fixtures" / "adversarial.json")
     rows = [await run_case(c) for c in cases]
     totals = {arm: {"pass": sum(r[arm]["pass"] for r in rows),
-                    "leaks": sum(bool(r[arm]["leaked"]) for r in rows),
+                    "exposed": sum(bool(r[arm]["leaked"]) for r in rows),
                     "cases": len(rows)} for arm in ARMS}
     result = {
-        "benchmark": "vercy-graphiti-adversarial/1",
+        "benchmark": "vercy-graphiti-adversarial/2",
         "fixture": "fixtures/adversarial.json",
+        "what_it_is": "A conformance fixture written from the Vercy enforcement contract. Not a quality "
+                      "benchmark of Graphiti, which does not claim to enforce ownership or disclosure.",
+        "exposed_means": "a listed withheld string appears in the payload the arm would forward to a model",
         "environment": {"graphiti-core": version("graphiti-core"), "kuzu": version("kuzu"),
-                        "python": platform.python_version(), "llm": "none", "embedder": "sha256 token hashing, 256 dims",
-                        "retrieval_path_covered": "Graphiti.search_ with EDGE_HYBRID_SEARCH_RRF"},
+                        "python": platform.python_version(), "llm": "none",
+                        "embedder": "sha256 token hashing, 256 dims (retrieval-top1 ranking depends on it)",
+                        "governed_read": "every edge of the concept node, EntityEdge.get_by_node_uuid"},
         "totals": totals,
         "cases": rows,
     }
@@ -67,11 +84,11 @@ async def main() -> int:
         cells = []
         for arm in ARMS:
             s = r[arm]
-            mark = "pass" if s["pass"] else ("LEAK " if s["leaked"] else "") + f"fail ({s['outcome']}/{s['answer']})"
+            mark = "pass" if s["pass"] else ("EXPOSED " if s["leaked"] else "") + f"{s['outcome']}/{s['answer']}"
             cells.append(f"{mark:>24}")
         print(f"{r['case']:{width}}  " + "  ".join(cells))
     print(f"{'total':{width}}  " + "  ".join(
-        f"{str(totals[a]['pass']) + '/' + str(len(rows)) + ', leaks ' + str(totals[a]['leaks']):>24}" for a in ARMS))
+        f"{str(totals[a]['pass']) + '/' + str(len(rows)) + ', exposed ' + str(totals[a]['exposed']):>24}" for a in ARMS))
     return 0 if totals["governed"]["pass"] == len(rows) else 1
 
 

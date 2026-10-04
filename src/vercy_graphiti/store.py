@@ -2,21 +2,23 @@
 
     gg = GovernedGraphiti(graphiti, host=Host(owners={...}), key=host_secret)
     await gg.write(record, written_by="finance")          # the host's authenticated write path
-    decision = await gg.ask("What does ARR mean?", concept="arr-definition",
+    decision = await gg.ask(concept="arr-definition",
                             caller=Caller.of("analyst", ["staff"]), as_of=date(2026, 9, 1))
     decision.payload()                                    # safe to hand to a model
 
-Covered retrieval path: `Graphiti.search_` with the edge RRF recipe. Other paths (graph
-walks, `get_by_uuid`, episode reads, community summaries) are not filtered by this
-wrapper; a host that exposes them to a caller is not enforcing the overlay on them.
+The governed read does not depend on search ranking: it loads every edge of the
+concept node and decides over all of them. Only `ask(...).payload()` is governed.
+Anything else a host exposes from the same graph (search results, graph walks,
+`get_by_uuid`, episodes, community summaries) is not filtered by this package.
 """
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
-from .enforce import Caller, Decision, Host, decide
-from .mapping import EDGE_NAME, edge_fields, fact_of, record_of, stripped_fact
+from .enforce import Caller, Decision, Fact, Host, decide
+from .mapping import (EDGE_NAME, OK, TAMPERED, edge_fields, fact_without_attestation,
+                      fact_without_fields, governed_fact, node_uuid, record_of, verify)
 
 SEARCH_LIMIT = 25
 
@@ -45,66 +47,75 @@ class GovernedGraphiti:
         if not key:
             raise ValueError("a host key is required to attest writers")
         self.graphiti, self.host, self.key, self.group_id = graphiti, host, key, group_id
-        self._nodes: dict[str, Any] = {}
 
-    async def _node(self, name: str):
+    async def _node(self, kind: str, name: str):
+        from graphiti_core.errors import NodeNotFoundError
         from graphiti_core.nodes import EntityNode
-        if name not in self._nodes:
-            node = EntityNode(name=name, group_id=self.group_id, labels=["Entity"],
+        uid = node_uuid(self.group_id, kind, name)
+        try:
+            return await EntityNode.get_by_uuid(self.graphiti.driver, uid)
+        except NodeNotFoundError:
+            node = EntityNode(uuid=uid, name=name, group_id=self.group_id, labels=["Entity"],
                               created_at=datetime.now(timezone.utc), summary="")
             await node.generate_name_embedding(self.graphiti.embedder)
             await node.save(self.graphiti.driver)
-            self._nodes[name] = node
-        return self._nodes[name]
+            return node
 
     async def write(self, record: dict[str, Any], written_by: str):
         """Store one overlay record. `written_by` must come from the host's authenticated session."""
         from graphiti_core.edges import EntityEdge
-        for required in ("record_id", "concept", "value"):
-            if not record.get(required):
-                raise ValueError(f"record needs {required!r}")
-        concept = await self._node(str(record["concept"]))
-        source = await self._node(str(record.get("source") or "unknown source"))
+        fields = edge_fields(record, written_by, self.key, self.group_id)     # validates the record
+        concept = await self._node("concept", record["concept"])
+        source = await self._node("source", str(record.get("source") or "unknown source"))
         edge = EntityEdge(source_node_uuid=concept.uuid, target_node_uuid=source.uuid,
-                          created_at=datetime.now(timezone.utc),
-                          **edge_fields(record, written_by, self.key, self.group_id))
+                          created_at=datetime.now(timezone.utc), **fields)
         await edge.generate_embedding(self.graphiti.embedder)
         await edge.save(self.graphiti.driver)
         return edge
 
-    async def search(self, question: str, search_filter: Any = None, limit: int = SEARCH_LIMIT) -> list:
+    async def _all_for(self, concept: str) -> list:
+        """Every edge of the concept node. Raises on a store error: no partial decisions."""
+        from graphiti_core.edges import EntityEdge
+        edges = await EntityEdge.get_by_node_uuid(self.graphiti.driver, node_uuid(self.group_id, "concept", concept))
+        return [e for e in edges if e.name == EDGE_NAME and e.group_id == self.group_id]
+
+    async def _decide(self, concept: str, caller: Caller, as_of: date, scope: Iterable[str],
+                      build: Callable[[dict, str], Fact]) -> Decision:
+        facts, failures = [], 0
+        for e in await self._all_for(concept):
+            status, record, writer = verify(e.attributes, self.key, self.group_id, e.uuid)
+            if status == OK:
+                facts.append(build(record, writer))
+            elif status == TAMPERED:
+                failures += 1
+        return decide(facts, concept=concept, caller=caller, as_of=as_of, host=self.host,
+                      scope=scope, integrity_failures=failures)
+
+    async def ask(self, *, concept: str, caller: Caller, as_of: date, scope: Iterable[str] = ()) -> Decision:
+        """The governed read over every record of the concept."""
+        return await self._decide(concept, caller, as_of, scope, governed_fact)
+
+    async def ask_without_fields(self, *, concept: str, caller: Caller, as_of: date) -> Decision:
+        """Ablation: same records, same attestation, overlay fields removed."""
+        return await self._decide(concept, caller, as_of, (), fact_without_fields)
+
+    async def ask_without_attestation(self, *, concept: str, caller: Caller, as_of: date) -> Decision:
+        """Ablation: same records and fields, writer unknown."""
+        return await self._decide(concept, caller, as_of, (), fact_without_attestation)
+
+    async def retrieve_top1(self, question: str, *, concept: str, as_of: date,
+                            limit: int = SEARCH_LIMIT) -> tuple[Optional[str], list[dict]]:
+        """Baseline host policy, not Graphiti's: search_ with Graphiti's own time filter, take the
+        top hit as the answer and forward every returned fact. Returns (answer id, ranked payload)."""
         results = await self.graphiti.search_(question, config=_recipe(limit), group_ids=[self.group_id],
-                                              search_filter=search_filter)
-        return list(results.edges)
-
-    async def ask(self, question: str, *, concept: str, caller: Caller, as_of: date,
-                  scope: Iterable[str] = ()) -> Decision:
-        """The governed read. Retrieval is unfiltered on purpose: rules decide, then disclosure."""
-        edges = await self.search(question)
-        facts = [f for f in (fact_of(e.attributes, self.key) for e in edges) if f is not None]
-        return decide(facts, concept=concept, caller=caller, as_of=as_of, host=self.host, scope=scope)
-
-    async def ask_stripped(self, question: str, *, concept: str, caller: Caller, as_of: date) -> Decision:
-        """Ablation: the same engine over the same edges with the overlay fields removed."""
-        edges = await self.search(question)
-        facts = [f for f in (stripped_fact(e.attributes) for e in edges) if f is not None]
-        return decide(facts, concept=concept, caller=caller, as_of=as_of, host=self.host)
-
-    async def ask_native(self, question: str, *, concept: str, as_of: date) -> tuple[Optional[str], list[dict]]:
-        """Baseline: Graphiti's own retrieval with its own time filter, top hit as the answer.
-
-        Returns (answer record id, payload). The payload is what a host would hand a model:
-        every returned fact, as Graphiti returns it.
-        """
-        edges = await self.search(question, search_filter=time_filter(as_of))
-        payload = []
-        answer = None
-        for e in edges:
+                                              search_filter=time_filter(as_of))
+        payload, answer = [], None
+        for rank, e in enumerate(results.edges, 1):
             record = record_of(e.attributes) or {}
             if record.get("concept") != concept:
                 continue
-            payload.append({"fact": e.fact, "record_id": record.get("record_id"), "source": record.get("source"),
-                            "valid_at": e.valid_at, "invalid_at": e.invalid_at})
+            payload.append({"rank": rank, "fact": e.fact, "record_id": record.get("record_id"),
+                            "source": record.get("source")})
             if answer is None:
                 answer = record.get("record_id")
         return answer, payload

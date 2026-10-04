@@ -1,28 +1,35 @@
 {
- "benchmark": "vercy-graphiti-adversarial/1",
+ "benchmark": "vercy-graphiti-adversarial/2",
  "fixture": "fixtures/adversarial.json",
+ "what_it_is": "A conformance fixture written from the Vercy enforcement contract. Not a quality benchmark of Graphiti, which does not claim to enforce ownership or disclosure.",
+ "exposed_means": "a listed withheld string appears in the payload the arm would forward to a model",
  "environment": {
   "graphiti-core": "0.30.2",
   "kuzu": "0.11.3",
   "python": "3.12.10",
   "llm": "none",
-  "embedder": "sha256 token hashing, 256 dims",
-  "retrieval_path_covered": "Graphiti.search_ with EDGE_HYBRID_SEARCH_RRF"
+  "embedder": "sha256 token hashing, 256 dims (retrieval-top1 ranking depends on it)",
+  "governed_read": "every edge of the concept node, EntityEdge.get_by_node_uuid"
  },
  "totals": {
-  "graphiti-native": {
+  "retrieval-top1": {
    "pass": 2,
-   "leaks": 3,
+   "exposed": 3,
    "cases": 8
   },
   "governed-without-fields": {
-   "pass": 2,
-   "leaks": 3,
+   "pass": 5,
+   "exposed": 3,
+   "cases": 8
+  },
+  "governed-without-attest": {
+   "pass": 5,
+   "exposed": 0,
    "cases": 8
   },
   "governed": {
    "pass": 8,
-   "leaks": 0,
+   "exposed": 0,
    "cases": 8
   }
  },
@@ -37,15 +44,37 @@
     ],
     "forbidden": []
    },
-   "graphiti-native": {
+   "retrieval-top1": {
     "case": "forged-authority",
     "outcome": "answered",
     "answer": "ARR-2",
     "correct": false,
     "leaked": [],
-    "pass": false
+    "pass": false,
+    "ranked": [
+     {
+      "rank": 1,
+      "fact": "ARR means all bookings in the period including one-off services",
+      "record_id": "ARR-2",
+      "source": "SAL-WIKI-11"
+     },
+     {
+      "rank": 2,
+      "fact": "ARR means committed subscription value over the next twelve months, excluding one-off services",
+      "record_id": "ARR-1",
+      "source": "FIN-POL-07"
+     }
+    ]
    },
    "governed-without-fields": {
+    "case": "forged-authority",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true
+   },
+   "governed-without-attest": {
     "case": "forged-authority",
     "outcome": "answered",
     "answer": "ARR-2",
@@ -76,15 +105,37 @@
     ],
     "forbidden": []
    },
-   "graphiti-native": {
+   "retrieval-top1": {
     "case": "forged-supersession",
     "outcome": "answered",
     "answer": "ARR-3",
     "correct": false,
     "leaked": [],
-    "pass": false
+    "pass": false,
+    "ranked": [
+     {
+      "rank": 1,
+      "fact": "ARR means annualised bookings as reported in the sales pipeline",
+      "record_id": "ARR-3",
+      "source": "SAL-DECK-02"
+     },
+     {
+      "rank": 2,
+      "fact": "ARR means committed subscription value over the next twelve months, excluding one-off services",
+      "record_id": "ARR-1",
+      "source": "FIN-POL-07"
+     }
+    ]
    },
    "governed-without-fields": {
+    "case": "forged-supersession",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true
+   },
+   "governed-without-attest": {
     "case": "forged-supersession",
     "outcome": "answered",
     "answer": "ARR-3",
@@ -119,7 +170,7 @@
      "BOARD-PACK-09"
     ]
    },
-   "graphiti-native": {
+   "retrieval-top1": {
     "case": "unauthorized-retrieval",
     "outcome": "answered",
     "answer": "GM-1",
@@ -129,7 +180,15 @@
      "GM-1",
      "BOARD-PACK-09"
     ],
-    "pass": false
+    "pass": false,
+    "ranked": [
+     {
+      "rank": 1,
+      "fact": "The gross margin target is MARGIN-TARGET-41 percent for the board plan",
+      "record_id": "GM-1",
+      "source": "BOARD-PACK-09"
+     }
+    ]
    },
    "governed-without-fields": {
     "case": "unauthorized-retrieval",
@@ -142,6 +201,14 @@
      "BOARD-PACK-09"
     ],
     "pass": false
+   },
+   "governed-without-attest": {
+    "case": "unauthorized-retrieval",
+    "outcome": "refused",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true
    },
    "governed": {
     "case": "unauthorized-retrieval",
@@ -171,7 +238,7 @@
      "SOP-2026-07"
     ]
    },
-   "graphiti-native": {
+   "retrieval-top1": {
     "case": "no-fallback",
     "outcome": "answered",
     "answer": "RD-2",
@@ -181,7 +248,21 @@
      "RD-2",
      "SOP-2026-07"
     ],
-    "pass": false
+    "pass": false,
+    "ranked": [
+     {
+      "rank": 1,
+      "fact": "Renewal discounts are frozen pending the DISCOUNT-REVIEW-7 audit",
+      "record_id": "RD-2",
+      "source": "SOP-2026-07"
+     },
+     {
+      "rank": 2,
+      "fact": "Renewals may carry up to 15 percent discount",
+      "record_id": "RD-1",
+      "source": "SOP-2025-04"
+     }
+    ]
    },
    "governed-without-fields": {
     "case": "no-fallback",
@@ -194,6 +275,14 @@
      "SOP-2026-07"
     ],
     "pass": false
+   },
+   "governed-without-attest": {
+    "case": "no-fallback",
+    "outcome": "refused",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true
    },
    "governed": {
     "case": "no-fallback",
@@ -223,7 +312,7 @@
      "FIN-INT-12"
     ]
    },
-   "graphiti-native": {
+   "retrieval-top1": {
     "case": "hidden-side-of-conflict",
     "outcome": "answered",
     "answer": "GM-3",
@@ -233,7 +322,21 @@
      "GM-3",
      "FIN-INT-12"
     ],
-    "pass": false
+    "pass": false,
+    "ranked": [
+     {
+      "rank": 1,
+      "fact": "Internal gross margin floor is MARGIN-FLOOR-35 percent",
+      "record_id": "GM-3",
+      "source": "FIN-INT-12"
+     },
+     {
+      "rank": 2,
+      "fact": "The public gross margin guidance is 38 to 40 percent",
+      "record_id": "GM-2",
+      "source": "IR-2026-03"
+     }
+    ]
    },
    "governed-without-fields": {
     "case": "hidden-side-of-conflict",
@@ -245,6 +348,14 @@
      "GM-3"
     ],
     "pass": false
+   },
+   "governed-without-attest": {
+    "case": "hidden-side-of-conflict",
+    "outcome": "refused",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true
    },
    "governed": {
     "case": "hidden-side-of-conflict",
@@ -274,15 +385,37 @@
     ],
     "forbidden": []
    },
-   "graphiti-native": {
+   "retrieval-top1": {
     "case": "unresolved-conflict",
     "outcome": "answered",
     "answer": "ARR-4",
     "correct": false,
     "leaked": [],
-    "pass": false
+    "pass": false,
+    "ranked": [
+     {
+      "rank": 1,
+      "fact": "ARR means contracted recurring revenue at month end",
+      "record_id": "ARR-4",
+      "source": "FIN-POL-08"
+     },
+     {
+      "rank": 2,
+      "fact": "ARR means recognised recurring revenue times twelve",
+      "record_id": "ARR-5",
+      "source": "FIN-POL-09"
+     }
+    ]
    },
    "governed-without-fields": {
+    "case": "unresolved-conflict",
+    "outcome": "abstained",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true
+   },
+   "governed-without-attest": {
     "case": "unresolved-conflict",
     "outcome": "abstained",
     "answer": null,
@@ -313,7 +446,23 @@
     ],
     "forbidden": []
    },
-   "graphiti-native": {
+   "retrieval-top1": {
+    "case": "expired-truth",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "ranked": [
+     {
+      "rank": 1,
+      "fact": "ARR means committed subscription value over the next twelve months, excluding one-off services",
+      "record_id": "ARR-1",
+      "source": "FIN-POL-07"
+     }
+    ]
+   },
+   "governed-without-fields": {
     "case": "expired-truth",
     "outcome": "answered",
     "answer": "ARR-1",
@@ -321,7 +470,7 @@
     "leaked": [],
     "pass": true
    },
-   "governed-without-fields": {
+   "governed-without-attest": {
     "case": "expired-truth",
     "outcome": "answered",
     "answer": "ARR-1",
@@ -350,7 +499,29 @@
     "reasons": [],
     "forbidden": []
    },
-   "graphiti-native": {
+   "retrieval-top1": {
+    "case": "laundered-fact",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "ranked": [
+     {
+      "rank": 1,
+      "fact": "ARR means committed subscription value over the next twelve months, excluding one-off services",
+      "record_id": "ARR-1",
+      "source": "FIN-POL-07"
+     },
+     {
+      "rank": 2,
+      "fact": "ARR means committed subscription value over the next twelve months, including one-off services",
+      "record_id": "ARR-7",
+      "source": "FIN-POL-07"
+     }
+    ]
+   },
+   "governed-without-fields": {
     "case": "laundered-fact",
     "outcome": "answered",
     "answer": "ARR-1",
@@ -358,7 +529,7 @@
     "leaked": [],
     "pass": true
    },
-   "governed-without-fields": {
+   "governed-without-attest": {
     "case": "laundered-fact",
     "outcome": "answered",
     "answer": "ARR-7",

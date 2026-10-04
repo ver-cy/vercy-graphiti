@@ -2,37 +2,68 @@
 
 Graphiti already carries the time half of the overlay on every edge (`valid_at`,
 `invalid_at`). This module adds the authority and disclosure half as edge
-attributes, and attests the writer with an HMAC the host keys, so that a record
-cannot make itself authoritative by writing a field.
+attributes inside a signed envelope:
 
     (concept) -[VERCY_FACT {fact, valid_at, invalid_at, attributes}]-> (source)
+
+The host signs (group, edge uuid, record, writer) with its own key. On read, an
+envelope whose signature fails is rejected whole: a record cannot make itself
+authoritative, move to another concept or group, or shed its `release_to`.
 """
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
+import re
 import uuid
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .enforce import Fact, _date
 
 EDGE_NAME = "VERCY_FACT"
-NS = uuid.UUID("6f1d2c1e-6b0e-5c3a-9d55-7665726379a1")   # uuid5 namespace for vercy record ids
+NS = uuid.UUID("6f1d2c1e-6b0e-5c3a-9d55-7665726379a1")   # uuid5 namespace for vercy ids
+ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+DATE_FIELDS = ("valid_from", "valid_to")
+
+OK, UNSIGNED, TAMPERED = "ok", "unsigned", "tampered"
+
+
+def validate(record: dict[str, Any]) -> None:
+    """JSON-native values only, so the signed bytes are the same on every machine."""
+    for key, value in record.items():
+        if not isinstance(key, str):
+            raise ValueError("record keys must be strings")
+        if key in DATE_FIELDS:
+            if value is not None and not (isinstance(value, str) and ISO_DATE.match(value)):
+                raise ValueError(f"{key} must be YYYY-MM-DD or null")
+        elif isinstance(value, list):
+            if not all(isinstance(v, str) for v in value):
+                raise ValueError(f"{key} must be a list of strings")
+        elif value is not None and not isinstance(value, (str, int, bool)):
+            raise ValueError(f"{key} must be a string, integer, boolean, list of strings or null")
+    for required in ("record_id", "concept", "value"):
+        if not isinstance(record.get(required), str) or not record[required].strip():
+            raise ValueError(f"record needs a non-empty string {required!r}")
 
 
 def canonical(record: dict[str, Any]) -> bytes:
-    return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
-                      default=str).encode("utf-8")
+    return json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
-def sign(key: bytes, record: dict[str, Any], written_by: str) -> str:
-    return hmac.new(key, canonical(record) + b"\x00" + written_by.encode("utf-8"), hashlib.sha256).hexdigest()
+def sign(key: bytes, group_id: str, edge_id: str, record: dict[str, Any], written_by: str) -> str:
+    message = b"\x00".join([b"vercy-envelope/1", group_id.encode(), edge_id.encode(),
+                            canonical(record), written_by.encode("utf-8")])
+    return hmac.new(key, message, hashlib.sha256).hexdigest()
+
+
+def node_uuid(group_id: str, kind: str, name: str) -> str:
+    return str(uuid.uuid5(NS, f"{group_id}:{kind}:{name}"))
 
 
 def edge_uuid(group_id: str, record_id: str) -> str:
-    return str(uuid.uuid5(NS, f"{group_id}:{record_id}"))
+    return str(uuid.uuid5(NS, f"{group_id}:edge:{record_id}"))
 
 
 def _dt(value: Any) -> Optional[datetime]:
@@ -42,17 +73,19 @@ def _dt(value: Any) -> Optional[datetime]:
 
 def edge_fields(record: dict[str, Any], written_by: str, key: bytes, group_id: str) -> dict[str, Any]:
     """The keyword arguments for an EntityEdge, minus the node uuids."""
+    validate(record)
+    eid = edge_uuid(group_id, record["record_id"])
     return {
-        "uuid": edge_uuid(group_id, str(record["record_id"])),
+        "uuid": eid,
         "name": EDGE_NAME,
-        "fact": str(record.get("value", "")),
+        "fact": record["value"],
         "group_id": group_id,
         "valid_at": _dt(record.get("valid_from")),
         "invalid_at": _dt(record.get("valid_to")),
         "attributes": {
-            "vercy_record": json.dumps(record, ensure_ascii=False, sort_keys=True, default=str),
+            "vercy_record": canonical(record).decode("utf-8"),
             "vercy_written_by": written_by,
-            "vercy_sig": sign(key, record, written_by),
+            "vercy_sig": sign(key, group_id, eid, record, written_by),
         },
     }
 
@@ -62,20 +95,24 @@ def record_of(attributes: dict[str, Any]) -> Optional[dict[str, Any]]:
     if not raw:
         return None
     try:
-        return json.loads(raw)
+        record = json.loads(raw)
     except (TypeError, ValueError):
         return None
+    return record if isinstance(record, dict) else None
 
 
-def fact_of(attributes: dict[str, Any], key: bytes) -> Optional[Fact]:
-    """A Fact whose writer is trusted only if the host's signature verifies."""
+def verify(attributes: dict[str, Any], key: bytes, group_id: str, edge_id: str) -> tuple[str, Optional[dict], Optional[str]]:
+    """(status, record, attested writer). Only `ok` envelopes may take part in a decision."""
     record = record_of(attributes)
     if record is None:
-        return None
-    claimed = str(attributes.get("vercy_written_by") or "")
+        return UNSIGNED, None, None
+    writer = str(attributes.get("vercy_written_by") or "")
     sig = str(attributes.get("vercy_sig") or "")
-    trusted = bool(claimed) and hmac.compare_digest(sig, sign(key, record, claimed))
-    return Fact.from_record(record, written_by=claimed if trusted else None)
+    if not writer or not sig:
+        return TAMPERED, None, None
+    if not hmac.compare_digest(sig, sign(key, group_id, edge_id, record, writer)):
+        return TAMPERED, None, None
+    return OK, record, writer
 
 
 STRIPPED = ("concept_owner", "owner_role", "conflict_policy", "priority", "release_to",
@@ -83,13 +120,15 @@ STRIPPED = ("concept_owner", "owner_role", "conflict_policy", "priority", "relea
             "does_not_apply_to")
 
 
-def stripped_fact(attributes: dict[str, Any]) -> Optional[Fact]:
-    """The ablation arm: the same record with the authority and disclosure fields removed.
+def governed_fact(record: dict[str, Any], writer: str) -> Fact:
+    return Fact.from_record(record, written_by=writer)
 
-    Time stays, because Graphiti has it natively. Writer attestation is dropped too, since
-    without the fields there is no ownership to check it against.
-    """
-    record = record_of(attributes)
-    if record is None:
-        return None
-    return Fact.from_record({k: v for k, v in record.items() if k not in STRIPPED}, written_by=None)
+
+def fact_without_fields(record: dict[str, Any], writer: str) -> Fact:
+    """Ablation: the overlay fields removed, the host's attestation and register kept."""
+    return Fact.from_record({k: v for k, v in record.items() if k not in STRIPPED}, written_by=writer)
+
+
+def fact_without_attestation(record: dict[str, Any], writer: str) -> Fact:
+    """Ablation: the fields kept, the writer unknown, so the ownership register matches nobody."""
+    return Fact.from_record(record, written_by=None)
