@@ -7,7 +7,8 @@ Arms, all over the same Graphiti graph:
                              as the answer and forwards every returned fact. A host policy, not
                              something Graphiti claims to do.
   governed-without-fields    the governed read, overlay fields removed, attestation kept
-  governed-without-attest    the governed read, fields kept, writer unknown
+  governed-without-attest    the governed read, fields kept, writer attribution dropped
+                             (envelope integrity is still verified)
   governed                   the governed read
 
 Every case gets a fresh in-memory Graphiti (Kuzu). No LLM, no network, no telemetry.

@@ -160,14 +160,16 @@ def decide(facts: Iterable[Fact], *, concept: str, caller: Caller, as_of: date,
     """Answer one concept for one caller at one date. Steps 1 to 5 of the contract, in order.
 
     `facts` must be every record the store holds for the concept. `integrity_failures` counts
-    records the store holds but whose envelope failed verification; they take no part.
+    records the store holds for it whose envelope could not be verified. Any such record makes
+    the decision fail closed: the unverifiable record might be the one that should govern, so
+    answering from the rest could fall back to a value the rules already rejected.
     """
+    if integrity_failures:
+        return _finish(Decision(REFUSED), [(INTEGRITY_FAILED, None)], caller, [])
     facts = [f for f in facts if f.concept == concept]
     scope = set(scope)
     owner = host.owners.get(concept)
     raw: list[tuple[str, Optional[Fact]]] = []
-    if integrity_failures:
-        raw.append((INTEGRITY_FAILED, None))
 
     def authoritative(f: Fact) -> bool:
         return owner is not None and f.written_by == owner

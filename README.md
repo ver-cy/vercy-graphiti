@@ -18,7 +18,7 @@ draft 0.3, using only Graphiti's public `EntityEdge`, `EntityNode` and `search_`
 Eight adversarial cases written from the contract, each with a fixed expected outcome. Four arms over
 the same Graphiti graph.
 
-| Case | Retrieval, top hit | Without fields | Without attestation | Governed |
+| Case | Retrieval, top hit | Without fields | Without writer attribution | Governed |
 |---|---|---|---|---|
 | Forged authority | other answer | pass | other answer | pass |
 | Forged supersession | other answer | pass | other answer | pass |
@@ -37,9 +37,10 @@ the same Graphiti graph.
   without something that does.
 - **Without fields** keeps the host's ownership register and writer attestation and removes the overlay
   fields. Attestation alone settles the authority cases and exposes restricted content.
-- **Without attestation** keeps the fields and drops the writer. The fields alone stop the exposure and
-  lose the authority cases.
-- Neither half is enough on its own. Both together pass all eight.
+- **Without writer attribution** keeps the fields and drops who wrote each record; envelope integrity
+  is still verified. The fields alone stop the exposure and lose the authority cases.
+- On these eight authored cases, both configurations with one component removed pass 5 of 8; the
+  complete configuration passes 8 of 8.
 
 "Exposed" means one of the case's listed withheld strings appears in the payload that arm would forward.
 The listed strings are the oracle; this is not a proof that nothing else could leak.
@@ -51,9 +52,10 @@ pip install "vercy-graphiti[offline]"
 python bench/run.py
 ```
 
-The run writes `bench/result.json`, including the ranked candidates the top-hit arm saw. It uses a
-deterministic hashing embedder, so the top-hit column can change with a real embedder. The governed
-columns cannot: they load every edge of the concept node and do not depend on ranking.
+The run writes `bench/result.json`, including the ranked candidates the top-hit arm saw. The top-hit
+arm reads a ranked list from `search_`; the three governed arms read every edge of the concept node.
+The harness uses a deterministic hashing embedder, so the top-hit column can change with a real
+embedder. The governed columns cannot.
 
 ## Use
 
@@ -78,6 +80,11 @@ decision.payload()   # outcome, answer, reason codes; safe to give to a model
 Outcomes are `answered`, `abstained`, `refused` or `empty`, with reason codes such as
 `unauthorized_precedence`, `superseded`, `not_released`, `expired` and `integrity_failed`. A refusal
 says how many relevant records were withheld and which rule applied, never which records.
+
+**Records are immutable.** Writing an existing `record_id` raises `RecordExists`; a new version is a
+new record that `supersedes` the old one. **Integrity fails closed.** If any governance edge of a
+concept has an envelope that does not verify, the concept answers `refused` with `integrity_failed`
+rather than deciding over the rest.
 
 **What is governed.** Only `ask(...).payload()`. Anything else a host exposes from the same graph
 (search results, graph walks, `get_by_uuid`, episodes, community summaries) is not filtered by this

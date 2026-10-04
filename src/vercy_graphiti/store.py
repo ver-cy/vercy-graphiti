@@ -7,7 +7,10 @@
     decision.payload()                                    # safe to hand to a model
 
 The governed read does not depend on search ranking: it loads every edge of the
-concept node and decides over all of them. Only `ask(...).payload()` is governed.
+concept node and decides over all of them. Only `ask(...).payload()` is governed. Records are immutable: writing an existing
+record_id raises `RecordExists`, so nobody, owner or not, can overwrite a record in
+place through this path. A governance edge whose envelope cannot be verified makes
+the whole concept fail closed (`refused`, `integrity_failed`).
 Anything else a host exposes from the same graph (search results, graph walks,
 `get_by_uuid`, episodes, community summaries) is not filtered by this package.
 """
@@ -17,7 +20,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Callable, Iterable, Optional
 
 from .enforce import Caller, Decision, Fact, Host, decide
-from .mapping import (EDGE_NAME, OK, TAMPERED, edge_fields, fact_without_attestation,
+from .mapping import (EDGE_NAME, OK, edge_fields, fact_without_attestation,
                       fact_without_fields, governed_fact, node_uuid, record_of, verify)
 
 SEARCH_LIMIT = 25
@@ -42,6 +45,10 @@ def time_filter(as_of: date):
     )
 
 
+class RecordExists(ValueError):
+    """Records are immutable. A new version is a new record_id that `supersedes` the old one."""
+
+
 class GovernedGraphiti:
     def __init__(self, graphiti: Any, host: Host, key: bytes, group_id: str = "vercy"):
         if not key:
@@ -64,7 +71,14 @@ class GovernedGraphiti:
     async def write(self, record: dict[str, Any], written_by: str):
         """Store one overlay record. `written_by` must come from the host's authenticated session."""
         from graphiti_core.edges import EntityEdge
+        from graphiti_core.errors import EdgeNotFoundError
         fields = edge_fields(record, written_by, self.key, self.group_id)     # validates the record
+        try:
+            await EntityEdge.get_by_uuid(self.graphiti.driver, fields["uuid"])
+            raise RecordExists(f"record {record['record_id']!r} already exists; write a new record_id "
+                               "that supersedes it")
+        except EdgeNotFoundError:
+            pass
         concept = await self._node("concept", record["concept"])
         source = await self._node("source", str(record.get("source") or "unknown source"))
         edge = EntityEdge(source_node_uuid=concept.uuid, target_node_uuid=source.uuid,
@@ -86,7 +100,7 @@ class GovernedGraphiti:
             status, record, writer = verify(e.attributes, self.key, self.group_id, e.uuid)
             if status == OK:
                 facts.append(build(record, writer))
-            elif status == TAMPERED:
+            else:               # a governance edge without a valid envelope: fail closed
                 failures += 1
         return decide(facts, concept=concept, caller=caller, as_of=as_of, host=self.host,
                       scope=scope, integrity_failures=failures)
@@ -100,7 +114,7 @@ class GovernedGraphiti:
         return await self._decide(concept, caller, as_of, (), fact_without_fields)
 
     async def ask_without_attestation(self, *, concept: str, caller: Caller, as_of: date) -> Decision:
-        """Ablation: same records and fields, writer unknown."""
+        """Ablation: same records and fields, writer attribution dropped. Integrity is still verified."""
         return await self._decide(concept, caller, as_of, (), fact_without_attestation)
 
     async def retrieve_top1(self, question: str, *, concept: str, as_of: date,

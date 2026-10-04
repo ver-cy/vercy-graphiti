@@ -171,8 +171,42 @@ class OnGraphiti(unittest.TestCase):
         self.assertNotIn("new", [r["record_id"] for r in ranked])     # outside the top 25
         self.assertEqual(d.outcome, "refused")                         # yet it still decides
 
-    def test_edge_written_around_the_adapter_is_rejected(self):
-        """A writer with raw graph access forges the owner's name. The envelope fails and the record is out."""
+    def test_nobody_can_overwrite_a_record(self):
+        from vercy_graphiti.store import RecordExists
+
+        async def go():
+            gg = self.make(Host(owners={"c": "owner"}))
+            await gg.write({"record_id": "a", "concept": "c", "value": "owner value",
+                            "valid_from": "2026-01-01", "valid_to": None}, written_by="owner")
+            with self.assertRaises(RecordExists):
+                await gg.write({"record_id": "a", "concept": "c", "value": "intruder value",
+                                "valid_from": "2026-01-01", "valid_to": None}, written_by="intruder")
+            return await gg.ask(concept="c", caller=Caller.of("x"), as_of=date(2026, 9, 1))
+        d = asyncio.run(go())
+        self.assertEqual(d.payload()["answer"]["value"], "owner value")
+
+    def test_corrupted_successor_fails_closed_without_fallback(self):
+        """Corrupt the restricted successor's envelope: the public predecessor must not answer."""
+        from graphiti_core.edges import EntityEdge
+        from vercy_graphiti.mapping import edge_uuid
+
+        async def go():
+            gg = self.make(Host(owners={"d": "ops"}))
+            await gg.write({"record_id": "old", "concept": "d", "value": "up to 15 percent",
+                            "valid_from": "2025-01-01", "valid_to": None}, written_by="ops")
+            await gg.write({"record_id": "new", "concept": "d", "value": "frozen", "valid_from": "2026-07-01",
+                            "valid_to": None, "supersedes": ["old"], "release_to": ["ops"]}, written_by="ops")
+            edge = await EntityEdge.get_by_uuid(gg.graphiti.driver, edge_uuid("t", "new"))
+            edge.attributes = {**edge.attributes, "vercy_record": "{}"}
+            await edge.save(gg.graphiti.driver)
+            return await gg.ask(concept="d", caller=Caller.of("rep"), as_of=date(2026, 9, 1))
+        d = asyncio.run(go())
+        self.assertEqual(d.outcome, "refused")
+        self.assertIn("integrity_failed", codes(d))
+        self.assertNotIn("15 percent", json.dumps(d.payload()))
+
+    def test_edge_written_around_the_adapter_fails_closed(self):
+        """A writer with raw graph access forges the owner's name. The envelope fails; nothing answers."""
         from datetime import datetime, timezone
 
         from graphiti_core.edges import EntityEdge
@@ -192,8 +226,8 @@ class OnGraphiti(unittest.TestCase):
             await edge.save(gg.graphiti.driver)
             return await gg.ask(concept="arr-definition", caller=Caller.of("analyst"), as_of=date(2026, 9, 1))
         d = asyncio.run(go())
-        self.assertEqual(d.answer.record_id, "ARR-1")
-        self.assertIn("integrity_failed", codes(d))
+        self.assertEqual(d.outcome, "refused")
+        self.assertEqual(codes(d), {"integrity_failed"})
 
 
 if __name__ == "__main__":
