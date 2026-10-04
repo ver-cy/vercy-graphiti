@@ -82,7 +82,9 @@ Outcomes are `answered`, `abstained`, `refused` or `empty`, with reason codes su
 says how many relevant records were withheld and which rule applied, never which records.
 
 **Records are immutable.** Writing an existing `record_id` raises `RecordExists`; a new version is a
-new record that `supersedes` the old one. **Integrity fails closed.** If any governance edge of a
+new record that `supersedes` the old one. This holds for **one `GovernedGraphiti` writer instance per
+group**: the check and the save run under that instance's lock. Graphiti's edge save is an upsert, so
+several writer processes or instances need a uniqueness guarantee from the host. **Integrity fails closed.** If any governance edge of a
 concept has an envelope that does not verify, the concept answers `refused` with `integrity_failed`
 rather than deciding over the rest.
 
