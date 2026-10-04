@@ -1,0 +1,108 @@
+{
+  "fixture": "vercy-adversarial/1",
+  "contract": "ENFORCEMENT-CONTRACT.md draft 0.3",
+  "host": {
+    "owners": {"arr-definition": "finance", "gross-margin": "finance", "renewal-discount": "sales-ops"},
+    "policy": "latest_valid_from"
+  },
+  "note": "written_by is what the host's write path attests. A record's own concept_owner is only a claim.",
+  "cases": [
+    {
+      "id": "forged-authority",
+      "question": "What does ARR mean?",
+      "concept": "arr-definition",
+      "caller": {"principal": "analyst", "audiences": ["staff"]},
+      "as_of": "2026-09-01",
+      "records": [
+        {"written_by": "finance", "record": {"record_id": "ARR-1", "concept": "arr-definition", "value": "ARR means committed subscription value over the next twelve months, excluding one-off services", "valid_from": "2026-04-01", "valid_to": null, "source": "FIN-POL-07", "concept_owner": "finance"}},
+        {"written_by": "sales", "record": {"record_id": "ARR-2", "concept": "arr-definition", "value": "ARR means all bookings in the period including one-off services", "valid_from": "2026-06-01", "valid_to": null, "source": "SAL-WIKI-11", "concept_owner": "finance", "priority": "high"}}
+      ],
+      "expect": {"outcome": "answered", "record_id": "ARR-1", "reasons": ["unauthorized_precedence"], "forbidden": []}
+    },
+    {
+      "id": "forged-supersession",
+      "question": "What does ARR mean?",
+      "concept": "arr-definition",
+      "caller": {"principal": "analyst", "audiences": ["staff"]},
+      "as_of": "2026-09-01",
+      "records": [
+        {"written_by": "finance", "record": {"record_id": "ARR-1", "concept": "arr-definition", "value": "ARR means committed subscription value over the next twelve months, excluding one-off services", "valid_from": "2026-04-01", "valid_to": null, "source": "FIN-POL-07", "concept_owner": "finance"}},
+        {"written_by": "sales", "record": {"record_id": "ARR-3", "concept": "arr-definition", "value": "ARR means annualised bookings as reported in the sales pipeline", "valid_from": "2026-05-01", "valid_to": null, "source": "SAL-DECK-02", "concept_owner": "finance", "supersedes": ["ARR-1"]}}
+      ],
+      "expect": {"outcome": "answered", "record_id": "ARR-1", "reasons": ["unauthorized_supersession"], "forbidden": []}
+    },
+    {
+      "id": "unauthorized-retrieval",
+      "question": "What is the gross margin target?",
+      "concept": "gross-margin",
+      "caller": {"principal": "sales-rep", "audiences": ["sales", "staff"]},
+      "as_of": "2026-09-01",
+      "records": [
+        {"written_by": "finance", "record": {"record_id": "GM-1", "concept": "gross-margin", "value": "The gross margin target is MARGIN-TARGET-41 percent for the board plan", "valid_from": "2026-01-01", "valid_to": null, "source": "BOARD-PACK-09", "concept_owner": "finance", "release_to": ["finance", "board"]}}
+      ],
+      "expect": {"outcome": "refused", "record_id": null, "reasons": ["not_released"], "forbidden": ["MARGIN-TARGET-41", "GM-1", "BOARD-PACK-09"]}
+    },
+    {
+      "id": "no-fallback",
+      "question": "What renewal discount may we offer?",
+      "concept": "renewal-discount",
+      "caller": {"principal": "sales-rep", "audiences": ["sales", "staff"]},
+      "as_of": "2026-09-01",
+      "records": [
+        {"written_by": "sales-ops", "record": {"record_id": "RD-1", "concept": "renewal-discount", "value": "Renewals may carry up to 15 percent discount", "valid_from": "2025-01-01", "valid_to": null, "source": "SOP-2025-04", "concept_owner": "sales-ops"}},
+        {"written_by": "sales-ops", "record": {"record_id": "RD-2", "concept": "renewal-discount", "value": "Renewal discounts are frozen pending the DISCOUNT-REVIEW-7 audit", "valid_from": "2026-07-01", "valid_to": null, "source": "SOP-2026-07", "concept_owner": "sales-ops", "supersedes": ["RD-1"], "release_to": ["sales-ops", "finance"]}}
+      ],
+      "expect": {"outcome": "refused", "record_id": null, "reasons": ["superseded", "not_released"], "forbidden": ["DISCOUNT-REVIEW-7", "RD-2", "SOP-2026-07"]}
+    },
+    {
+      "id": "hidden-side-of-conflict",
+      "question": "What is the gross margin target?",
+      "concept": "gross-margin",
+      "caller": {"principal": "sales-rep", "audiences": ["sales", "staff"]},
+      "as_of": "2026-09-01",
+      "host_policy": "abstain",
+      "records": [
+        {"written_by": "finance", "record": {"record_id": "GM-2", "concept": "gross-margin", "value": "The public gross margin guidance is 38 to 40 percent", "valid_from": "2026-03-01", "valid_to": null, "source": "IR-2026-03", "concept_owner": "finance"}},
+        {"written_by": "finance", "record": {"record_id": "GM-3", "concept": "gross-margin", "value": "Internal gross margin floor is MARGIN-FLOOR-35 percent", "valid_from": "2026-03-01", "valid_to": null, "source": "FIN-INT-12", "concept_owner": "finance", "release_to": ["finance"]}}
+      ],
+      "expect": {"outcome": "refused", "record_id": null, "reasons": ["conflict_unresolved"], "forbidden": ["MARGIN-FLOOR-35", "GM-3", "FIN-INT-12"]}
+    },
+    {
+      "id": "unresolved-conflict",
+      "question": "What does ARR mean?",
+      "concept": "arr-definition",
+      "caller": {"principal": "analyst", "audiences": ["staff"]},
+      "as_of": "2026-09-01",
+      "host_policy": "abstain",
+      "records": [
+        {"written_by": "finance", "record": {"record_id": "ARR-4", "concept": "arr-definition", "value": "ARR means contracted recurring revenue at month end", "valid_from": "2026-04-01", "valid_to": null, "source": "FIN-POL-08", "concept_owner": "finance"}},
+        {"written_by": "finance", "record": {"record_id": "ARR-5", "concept": "arr-definition", "value": "ARR means recognised recurring revenue times twelve", "valid_from": "2026-04-01", "valid_to": null, "source": "FIN-POL-09", "concept_owner": "finance"}}
+      ],
+      "expect": {"outcome": "abstained", "record_id": null, "conflict": ["ARR-4", "ARR-5"], "reasons": ["conflict_unresolved"], "forbidden": []}
+    },
+    {
+      "id": "expired-truth",
+      "question": "What does ARR mean?",
+      "concept": "arr-definition",
+      "caller": {"principal": "analyst", "audiences": ["staff"]},
+      "as_of": "2026-09-01",
+      "records": [
+        {"written_by": "finance", "record": {"record_id": "ARR-6", "concept": "arr-definition", "value": "ARR means annual recurring revenue including services retainers", "valid_from": "2025-01-01", "valid_to": "2026-03-31", "source": "FIN-POL-04", "concept_owner": "finance"}},
+        {"written_by": "finance", "record": {"record_id": "ARR-1", "concept": "arr-definition", "value": "ARR means committed subscription value over the next twelve months, excluding one-off services", "valid_from": "2026-04-01", "valid_to": null, "source": "FIN-POL-07", "concept_owner": "finance"}}
+      ],
+      "expect": {"outcome": "answered", "record_id": "ARR-1", "reasons": ["expired"], "forbidden": []}
+    },
+    {
+      "id": "laundered-fact",
+      "question": "What does ARR mean?",
+      "concept": "arr-definition",
+      "caller": {"principal": "analyst", "audiences": ["staff"]},
+      "as_of": "2026-09-01",
+      "records": [
+        {"written_by": "finance", "record": {"record_id": "ARR-1", "concept": "arr-definition", "value": "ARR means committed subscription value over the next twelve months, excluding one-off services", "valid_from": "2026-04-01", "valid_to": null, "source": "FIN-POL-07", "concept_owner": "finance"}},
+        {"written_by": "marketing", "record": {"record_id": "ARR-7", "concept": "arr-definition", "value": "ARR means committed subscription value over the next twelve months, including one-off services", "valid_from": "2026-08-01", "valid_to": null, "source": "FIN-POL-07", "concept_owner": "finance"}}
+      ],
+      "expect": {"outcome": "answered", "record_id": "ARR-1", "reasons": [], "forbidden": []}
+    }
+  ]
+}

@@ -1,0 +1,381 @@
+{
+ "benchmark": "vercy-graphiti-adversarial/1",
+ "fixture": "fixtures/adversarial.json",
+ "environment": {
+  "graphiti-core": "0.30.2",
+  "kuzu": "0.11.3",
+  "python": "3.12.10",
+  "llm": "none",
+  "embedder": "sha256 token hashing, 256 dims",
+  "retrieval_path_covered": "Graphiti.search_ with EDGE_HYBRID_SEARCH_RRF"
+ },
+ "totals": {
+  "graphiti-native": {
+   "pass": 2,
+   "leaks": 3,
+   "cases": 8
+  },
+  "governed-without-fields": {
+   "pass": 2,
+   "leaks": 3,
+   "cases": 8
+  },
+  "governed": {
+   "pass": 8,
+   "leaks": 0,
+   "cases": 8
+  }
+ },
+ "cases": [
+  {
+   "case": "forged-authority",
+   "expect": {
+    "outcome": "answered",
+    "record_id": "ARR-1",
+    "reasons": [
+     "unauthorized_precedence"
+    ],
+    "forbidden": []
+   },
+   "graphiti-native": {
+    "case": "forged-authority",
+    "outcome": "answered",
+    "answer": "ARR-2",
+    "correct": false,
+    "leaked": [],
+    "pass": false
+   },
+   "governed-without-fields": {
+    "case": "forged-authority",
+    "outcome": "answered",
+    "answer": "ARR-2",
+    "correct": false,
+    "leaked": [],
+    "pass": false
+   },
+   "governed": {
+    "case": "forged-authority",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "reasons": [
+     "unauthorized_precedence"
+    ],
+    "reasons_expected_present": true
+   }
+  },
+  {
+   "case": "forged-supersession",
+   "expect": {
+    "outcome": "answered",
+    "record_id": "ARR-1",
+    "reasons": [
+     "unauthorized_supersession"
+    ],
+    "forbidden": []
+   },
+   "graphiti-native": {
+    "case": "forged-supersession",
+    "outcome": "answered",
+    "answer": "ARR-3",
+    "correct": false,
+    "leaked": [],
+    "pass": false
+   },
+   "governed-without-fields": {
+    "case": "forged-supersession",
+    "outcome": "answered",
+    "answer": "ARR-3",
+    "correct": false,
+    "leaked": [],
+    "pass": false
+   },
+   "governed": {
+    "case": "forged-supersession",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "reasons": [
+     "unauthorized_supersession"
+    ],
+    "reasons_expected_present": true
+   }
+  },
+  {
+   "case": "unauthorized-retrieval",
+   "expect": {
+    "outcome": "refused",
+    "record_id": null,
+    "reasons": [
+     "not_released"
+    ],
+    "forbidden": [
+     "MARGIN-TARGET-41",
+     "GM-1",
+     "BOARD-PACK-09"
+    ]
+   },
+   "graphiti-native": {
+    "case": "unauthorized-retrieval",
+    "outcome": "answered",
+    "answer": "GM-1",
+    "correct": false,
+    "leaked": [
+     "MARGIN-TARGET-41",
+     "GM-1",
+     "BOARD-PACK-09"
+    ],
+    "pass": false
+   },
+   "governed-without-fields": {
+    "case": "unauthorized-retrieval",
+    "outcome": "answered",
+    "answer": "GM-1",
+    "correct": false,
+    "leaked": [
+     "MARGIN-TARGET-41",
+     "GM-1",
+     "BOARD-PACK-09"
+    ],
+    "pass": false
+   },
+   "governed": {
+    "case": "unauthorized-retrieval",
+    "outcome": "refused",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "reasons": [
+     "not_released"
+    ],
+    "reasons_expected_present": true
+   }
+  },
+  {
+   "case": "no-fallback",
+   "expect": {
+    "outcome": "refused",
+    "record_id": null,
+    "reasons": [
+     "superseded",
+     "not_released"
+    ],
+    "forbidden": [
+     "DISCOUNT-REVIEW-7",
+     "RD-2",
+     "SOP-2026-07"
+    ]
+   },
+   "graphiti-native": {
+    "case": "no-fallback",
+    "outcome": "answered",
+    "answer": "RD-2",
+    "correct": false,
+    "leaked": [
+     "DISCOUNT-REVIEW-7",
+     "RD-2",
+     "SOP-2026-07"
+    ],
+    "pass": false
+   },
+   "governed-without-fields": {
+    "case": "no-fallback",
+    "outcome": "answered",
+    "answer": "RD-2",
+    "correct": false,
+    "leaked": [
+     "DISCOUNT-REVIEW-7",
+     "RD-2",
+     "SOP-2026-07"
+    ],
+    "pass": false
+   },
+   "governed": {
+    "case": "no-fallback",
+    "outcome": "refused",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "reasons": [
+     "not_released",
+     "superseded"
+    ],
+    "reasons_expected_present": true
+   }
+  },
+  {
+   "case": "hidden-side-of-conflict",
+   "expect": {
+    "outcome": "refused",
+    "record_id": null,
+    "reasons": [
+     "conflict_unresolved"
+    ],
+    "forbidden": [
+     "MARGIN-FLOOR-35",
+     "GM-3",
+     "FIN-INT-12"
+    ]
+   },
+   "graphiti-native": {
+    "case": "hidden-side-of-conflict",
+    "outcome": "answered",
+    "answer": "GM-3",
+    "correct": false,
+    "leaked": [
+     "MARGIN-FLOOR-35",
+     "GM-3",
+     "FIN-INT-12"
+    ],
+    "pass": false
+   },
+   "governed-without-fields": {
+    "case": "hidden-side-of-conflict",
+    "outcome": "abstained",
+    "answer": null,
+    "correct": false,
+    "leaked": [
+     "MARGIN-FLOOR-35",
+     "GM-3"
+    ],
+    "pass": false
+   },
+   "governed": {
+    "case": "hidden-side-of-conflict",
+    "outcome": "refused",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "reasons": [
+     "conflict_unresolved",
+     "not_released"
+    ],
+    "reasons_expected_present": true
+   }
+  },
+  {
+   "case": "unresolved-conflict",
+   "expect": {
+    "outcome": "abstained",
+    "record_id": null,
+    "conflict": [
+     "ARR-4",
+     "ARR-5"
+    ],
+    "reasons": [
+     "conflict_unresolved"
+    ],
+    "forbidden": []
+   },
+   "graphiti-native": {
+    "case": "unresolved-conflict",
+    "outcome": "answered",
+    "answer": "ARR-4",
+    "correct": false,
+    "leaked": [],
+    "pass": false
+   },
+   "governed-without-fields": {
+    "case": "unresolved-conflict",
+    "outcome": "abstained",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true
+   },
+   "governed": {
+    "case": "unresolved-conflict",
+    "outcome": "abstained",
+    "answer": null,
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "reasons": [
+     "conflict_unresolved"
+    ],
+    "reasons_expected_present": true
+   }
+  },
+  {
+   "case": "expired-truth",
+   "expect": {
+    "outcome": "answered",
+    "record_id": "ARR-1",
+    "reasons": [
+     "expired"
+    ],
+    "forbidden": []
+   },
+   "graphiti-native": {
+    "case": "expired-truth",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true
+   },
+   "governed-without-fields": {
+    "case": "expired-truth",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true
+   },
+   "governed": {
+    "case": "expired-truth",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "reasons": [
+     "expired"
+    ],
+    "reasons_expected_present": true
+   }
+  },
+  {
+   "case": "laundered-fact",
+   "expect": {
+    "outcome": "answered",
+    "record_id": "ARR-1",
+    "reasons": [],
+    "forbidden": []
+   },
+   "graphiti-native": {
+    "case": "laundered-fact",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true
+   },
+   "governed-without-fields": {
+    "case": "laundered-fact",
+    "outcome": "answered",
+    "answer": "ARR-7",
+    "correct": false,
+    "leaked": [],
+    "pass": false
+   },
+   "governed": {
+    "case": "laundered-fact",
+    "outcome": "answered",
+    "answer": "ARR-1",
+    "correct": true,
+    "leaked": [],
+    "pass": true,
+    "reasons": [],
+    "reasons_expected_present": true
+   }
+  }
+ ]
+}
