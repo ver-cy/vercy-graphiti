@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 - unreleased
+## 0.1.0 - 2026-10-04
 
 - `enforce`: the Vercy enforcement contract draft 0.3 as a store-agnostic engine.
 - `GovernedGraphiti`: overlay records as Graphiti edges, writer attested by a host HMAC,
