@@ -25,6 +25,7 @@ from .enforce import Fact, _date
 EDGE_NAME = "VERCY_FACT"
 NS = uuid.UUID("6f1d2c1e-6b0e-5c3a-9d55-7665726379a1")   # uuid5 namespace for vercy ids
 ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+SIG = re.compile(r"^[0-9a-f]{64}$")
 DATE_FIELDS = ("valid_from", "valid_to")
 
 OK, UNSIGNED, TAMPERED = "ok", "unsigned", "tampered"
@@ -106,9 +107,9 @@ def verify(attributes: dict[str, Any], key: bytes, group_id: str, edge_id: str) 
     record = record_of(attributes)
     if record is None:
         return UNSIGNED, None, None
-    writer = str(attributes.get("vercy_written_by") or "")
-    sig = str(attributes.get("vercy_sig") or "")
-    if not writer or not sig:
+    writer = attributes.get("vercy_written_by")
+    sig = attributes.get("vercy_sig")
+    if not isinstance(writer, str) or not writer or not isinstance(sig, str) or not SIG.match(sig):
         return TAMPERED, None, None
     if not hmac.compare_digest(sig, sign(key, group_id, edge_id, record, writer)):
         return TAMPERED, None, None

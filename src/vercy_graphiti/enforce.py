@@ -1,6 +1,6 @@
 """Enforcement of the Vercy Governance Overlay, store-agnostic.
 
-Implements ENFORCEMENT-CONTRACT.md draft 0.3 (https://github.com/ver-cy/vercy-py):
+Implements ENFORCEMENT-CONTRACT.md draft 0.4 (https://github.com/ver-cy/vercy-py):
 validity, applicability, supersession, precedence, then disclosure last, with
 stable reason codes and a disclosure boundary that never names a withheld record.
 

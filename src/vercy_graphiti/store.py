@@ -16,6 +16,7 @@ Anything else a host exposes from the same graph (search results, graph walks,
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Iterable, Optional
 
@@ -54,6 +55,7 @@ class GovernedGraphiti:
         if not key:
             raise ValueError("a host key is required to attest writers")
         self.graphiti, self.host, self.key, self.group_id = graphiti, host, key, group_id
+        self._write_lock = asyncio.Lock()
 
     async def _node(self, kind: str, name: str):
         from graphiti_core.errors import NodeNotFoundError
@@ -69,22 +71,32 @@ class GovernedGraphiti:
             return node
 
     async def write(self, record: dict[str, Any], written_by: str):
-        """Store one overlay record. `written_by` must come from the host's authenticated session."""
+        """Store one overlay record. `written_by` must come from the host's authenticated session.
+
+        The existence check and the save run under one lock, and the stored envelope is read
+        back afterwards. That makes this instance the single writer for its group: run one
+        GovernedGraphiti writer per group, or put a uniqueness constraint in front of it.
+        Graphiti's edge save is an upsert, so a second writer process could still race.
+        """
         from graphiti_core.edges import EntityEdge
         from graphiti_core.errors import EdgeNotFoundError
         fields = edge_fields(record, written_by, self.key, self.group_id)     # validates the record
-        try:
-            await EntityEdge.get_by_uuid(self.graphiti.driver, fields["uuid"])
-            raise RecordExists(f"record {record['record_id']!r} already exists; write a new record_id "
-                               "that supersedes it")
-        except EdgeNotFoundError:
-            pass
-        concept = await self._node("concept", record["concept"])
-        source = await self._node("source", str(record.get("source") or "unknown source"))
-        edge = EntityEdge(source_node_uuid=concept.uuid, target_node_uuid=source.uuid,
-                          created_at=datetime.now(timezone.utc), **fields)
-        await edge.generate_embedding(self.graphiti.embedder)
-        await edge.save(self.graphiti.driver)
+        async with self._write_lock:
+            try:
+                await EntityEdge.get_by_uuid(self.graphiti.driver, fields["uuid"])
+                raise RecordExists(f"record {record['record_id']!r} already exists; write a new "
+                                   "record_id that supersedes it")
+            except EdgeNotFoundError:
+                pass
+            concept = await self._node("concept", record["concept"])
+            source = await self._node("source", str(record.get("source") or "unknown source"))
+            edge = EntityEdge(source_node_uuid=concept.uuid, target_node_uuid=source.uuid,
+                              created_at=datetime.now(timezone.utc), **fields)
+            await edge.generate_embedding(self.graphiti.embedder)
+            await edge.save(self.graphiti.driver)
+            stored = await EntityEdge.get_by_uuid(self.graphiti.driver, fields["uuid"])
+            if stored.attributes.get("vercy_sig") != fields["attributes"]["vercy_sig"]:
+                raise RecordExists(f"record {record['record_id']!r} was written concurrently by another writer")
         return edge
 
     async def _all_for(self, concept: str) -> list:

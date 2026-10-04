@@ -11,7 +11,7 @@ Graphiti already keeps the time half of a governed fact: every edge carries `val
   record in the payload.
 
 It implements the [Vercy enforcement contract](https://github.com/ver-cy/vercy-py/blob/main/ENFORCEMENT-CONTRACT.md),
-draft 0.3, using only Graphiti's public `EntityEdge`, `EntityNode` and `search_` APIs.
+draft 0.4, using only Graphiti's public `EntityEdge`, `EntityNode` and `search_` APIs.
 
 ## Result
 

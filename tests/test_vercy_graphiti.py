@@ -120,6 +120,12 @@ class Envelope(unittest.TestCase):
         status, record, writer = verify(tampered, b"k", "g", f["uuid"])
         self.assertEqual((status, record, writer), (TAMPERED, None, None))
 
+    def test_malformed_signature_is_tampered_not_an_exception(self):
+        f = edge_fields(self.record, "owner", b"k", "g")
+        for sig in ("é", 7, None, "ab"):
+            attrs = dict(f["attributes"], vercy_sig=sig)
+            self.assertEqual(verify(attrs, b"k", "g", f["uuid"])[0], TAMPERED, sig)
+
     def test_writer_is_signed(self):
         self.assertNotEqual(sign(b"k", "g", "e", self.record, "owner"), sign(b"k", "g", "e", self.record, "owner2"))
 
@@ -184,6 +190,22 @@ class OnGraphiti(unittest.TestCase):
             return await gg.ask(concept="c", caller=Caller.of("x"), as_of=date(2026, 9, 1))
         d = asyncio.run(go())
         self.assertEqual(d.payload()["answer"]["value"], "owner value")
+
+    def test_concurrent_writes_of_one_record_id_leave_exactly_one(self):
+        from vercy_graphiti.store import RecordExists
+
+        async def go():
+            gg = self.make(Host(owners={"c": "owner"}))
+            base = {"record_id": "a", "concept": "c", "valid_from": "2026-01-01", "valid_to": None}
+            results = await asyncio.gather(gg.write({**base, "value": "owner value"}, written_by="owner"),
+                                           gg.write({**base, "value": "intruder value"}, written_by="intruder"),
+                                           return_exceptions=True)
+            d = await gg.ask(concept="c", caller=Caller.of("x"), as_of=date(2026, 9, 1))
+            return results, d
+        results, d = asyncio.run(go())
+        self.assertEqual(sum(isinstance(r, RecordExists) for r in results), 1)
+        self.assertEqual(d.outcome, "answered")
+        self.assertEqual(len([r for r in results if not isinstance(r, Exception)]), 1)
 
     def test_corrupted_successor_fails_closed_without_fallback(self):
         """Corrupt the restricted successor's envelope: the public predecessor must not answer."""
