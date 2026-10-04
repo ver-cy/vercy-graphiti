@@ -37,3 +37,31 @@ jobs:
         with:
           name: bench-result
           path: bench/result.json
+
+  graphiti-neo4j:
+    runs-on: ubuntu-latest
+    services:
+      neo4j:
+        image: neo4j:5
+        env:
+          NEO4J_AUTH: neo4j/vercy-ci-only
+        ports: ["7687:7687"]
+        options: >-
+          --health-cmd "cypher-shell -u neo4j -p vercy-ci-only 'RETURN 1'"
+          --health-interval 5s --health-timeout 5s --health-retries 30
+    env:
+      GRAPHITI_TELEMETRY_ENABLED: "false"
+      VERCY_NEO4J_URI: bolt://localhost:7687
+      VERCY_NEO4J_USER: neo4j
+      VERCY_NEO4J_PASSWORD: vercy-ci-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ".[offline]"
+      - run: python bench/run.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-result-neo4j
+          path: bench/result.json

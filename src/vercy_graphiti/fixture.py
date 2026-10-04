@@ -51,3 +51,8 @@ def score(case: Case, outcome: str, answer_id: Optional[str], payload: Any,
         correct = correct and sorted(conflict_ids or []) == sorted(case.expect["conflict"])
     return {"case": case.id, "outcome": outcome, "answer": answer_id, "correct": correct,
             "leaked": leaked, "pass": correct and not leaked}
+
+
+def exposed_in(case: Case, payload: Any) -> list[str]:
+    text = json.dumps(payload, ensure_ascii=False, default=str)
+    return [s for s in case.expect.get("forbidden", []) if s in text]

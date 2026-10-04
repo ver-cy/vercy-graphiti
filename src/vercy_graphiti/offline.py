@@ -1,6 +1,8 @@
 """Graphiti with no LLM, no network and no telemetry, for reproducible runs.
 
-- Kuzu embedded in memory as the graph store (graphiti-core 0.30 still ships the driver).
+- Kuzu embedded in memory as the default graph store (graphiti-core 0.30 still ships the driver,
+  deprecated). Set VERCY_NEO4J_URI (plus VERCY_NEO4J_USER / VERCY_NEO4J_PASSWORD) to run the same
+  harness on Neo4j, Graphiti's primary backend; CI does both.
 - A deterministic hashing embedder: stable across machines, no model download.
 - No LLM and no cross-encoder: writes go through `EntityEdge.save`, searches use the
   BM25 + cosine RRF recipe. Any accidental LLM call raises instead of reaching a provider.
@@ -17,14 +19,31 @@ import os
 os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
 
 
-def make_graphiti():
+async def open_graphiti():
+    """A Graphiti on Neo4j when VERCY_NEO4J_URI is set, otherwise on in-memory Kuzu."""
+    uri = os.environ.get("VERCY_NEO4J_URI")
+    if not uri:
+        return make_graphiti()
+    from graphiti_core.driver.neo4j_driver import Neo4jDriver
+    driver = Neo4jDriver(uri, os.environ.get("VERCY_NEO4J_USER", "neo4j"), os.environ.get("VERCY_NEO4J_PASSWORD"))
+    graphiti = make_graphiti(driver)
+    await graphiti.build_indices_and_constraints()
+    return graphiti
+
+
+def backend() -> str:
+    return "neo4j" if os.environ.get("VERCY_NEO4J_URI") else "kuzu (embedded, in memory)"
+
+
+def make_graphiti(driver=None):
     import warnings
 
-    import kuzu
     from graphiti_core import Graphiti
     from graphiti_core.cross_encoder.client import CrossEncoderClient
     from graphiti_core.driver.driver import GraphProvider
-    from graphiti_core.driver.kuzu_driver import KuzuDriver
+    if driver is None:
+        import kuzu
+        from graphiti_core.driver.kuzu_driver import KuzuDriver
     from graphiti_core.embedder.client import EmbedderClient
     from graphiti_core.graph_queries import get_fulltext_indices
     from graphiti_core.llm_client.client import LLMClient
@@ -57,13 +76,14 @@ def make_graphiti():
         async def rank(self, query, passages):
             raise RuntimeError("this harness makes no reranker calls")
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", DeprecationWarning)
-        driver = KuzuDriver(db=":memory:")
-    # The Kuzu driver creates its schema but not its full-text indices; search needs them.
-    conn = kuzu.Connection(driver.db)
-    conn.execute("LOAD EXTENSION FTS;")
-    for query in get_fulltext_indices(GraphProvider.KUZU):
-        conn.execute(query)
-    conn.close()
+    if driver is None:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            driver = KuzuDriver(db=":memory:")
+        # The Kuzu driver creates its schema but not its full-text indices; search needs them.
+        conn = kuzu.Connection(driver.db)
+        conn.execute("LOAD EXTENSION FTS;")
+        for query in get_fulltext_indices(GraphProvider.KUZU):
+            conn.execute(query)
+        conn.close()
     return Graphiti(graph_driver=driver, llm_client=NoLLM(), embedder=HashEmbedder(), cross_encoder=NoRerank())

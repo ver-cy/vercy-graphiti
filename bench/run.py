@@ -25,8 +25,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from vercy_graphiti.fixture import load, score  # noqa: E402
-from vercy_graphiti.offline import make_graphiti  # noqa: E402
+from vercy_graphiti.fixture import exposed_in, load, score  # noqa: E402
+from vercy_graphiti.offline import backend, open_graphiti  # noqa: E402
 from vercy_graphiti.store import GovernedGraphiti  # noqa: E402
 
 KEY = b"vercy-bench-host-key"   # a fixed key: the run must be reproducible
@@ -39,14 +39,17 @@ def judged(case, decision):
 
 
 async def run_case(case) -> dict:
-    gg = GovernedGraphiti(make_graphiti(), host=case.host, key=KEY, group_id="bench")
+    gg = GovernedGraphiti(await open_graphiti(), host=case.host, key=KEY, group_id=f"bench-{case.id}")
     for written_by, record in case.records:
         await gg.write(record, written_by=written_by)
     kw = dict(concept=case.concept, caller=case.caller, as_of=case.as_of)
 
     answer, ranked = await gg.retrieve_top1(case.question, concept=case.concept, as_of=case.as_of)
     row = {"case": case.id, "expect": case.expect,
-           "retrieval-top1": {**score(case, "answered" if answer else "empty", answer, ranked), "ranked": ranked},
+           "retrieval-top1": {**score(case, "answered" if answer else "empty", answer, ranked),
+                              "exposed_in_answer": exposed_in(case, ranked[:1]),
+                              "exposed_in_forwarded_list": exposed_in(case, ranked[1:]),
+                              "ranked": ranked},
            "governed-without-fields": judged(case, await gg.ask_without_fields(**kw)),
            "governed-without-attest": judged(case, await gg.ask_without_attestation(**kw))}
     d = await gg.ask(**kw)
@@ -69,8 +72,9 @@ async def main() -> int:
         "fixture": "fixtures/adversarial.json",
         "what_it_is": "A conformance fixture written from the Vercy enforcement contract. Not a quality "
                       "benchmark of Graphiti, which does not claim to enforce ownership or disclosure.",
-        "exposed_means": "a listed withheld string appears in the payload the arm would forward to a model",
-        "environment": {"graphiti-core": version("graphiti-core"), "kuzu": version("kuzu"),
+        "exposed_means": "a listed withheld string appears in the payload the arm would forward to a model; "
+                         "for retrieval-top1 it is split into the chosen answer and the rest of the forwarded list",
+        "environment": {"graphiti-core": version("graphiti-core"), "backend": backend(),
                         "python": platform.python_version(), "llm": "none",
                         "embedder": "sha256 token hashing, 256 dims (retrieval-top1 ranking depends on it)",
                         "governed_read": "every edge of the concept node, EntityEdge.get_by_node_uuid"},

@@ -2,10 +2,10 @@
  "benchmark": "vercy-graphiti-adversarial/2",
  "fixture": "fixtures/adversarial.json",
  "what_it_is": "A conformance fixture written from the Vercy enforcement contract. Not a quality benchmark of Graphiti, which does not claim to enforce ownership or disclosure.",
- "exposed_means": "a listed withheld string appears in the payload the arm would forward to a model",
+ "exposed_means": "a listed withheld string appears in the payload the arm would forward to a model; for retrieval-top1 it is split into the chosen answer and the rest of the forwarded list",
  "environment": {
   "graphiti-core": "0.30.2",
-  "kuzu": "0.11.3",
+  "backend": "kuzu (embedded, in memory)",
   "python": "3.12.10",
   "llm": "none",
   "embedder": "sha256 token hashing, 256 dims (retrieval-top1 ranking depends on it)",
@@ -51,6 +51,8 @@
     "correct": false,
     "leaked": [],
     "pass": false,
+    "exposed_in_answer": [],
+    "exposed_in_forwarded_list": [],
     "ranked": [
      {
       "rank": 1,
@@ -112,6 +114,8 @@
     "correct": false,
     "leaked": [],
     "pass": false,
+    "exposed_in_answer": [],
+    "exposed_in_forwarded_list": [],
     "ranked": [
      {
       "rank": 1,
@@ -181,6 +185,12 @@
      "BOARD-PACK-09"
     ],
     "pass": false,
+    "exposed_in_answer": [
+     "MARGIN-TARGET-41",
+     "GM-1",
+     "BOARD-PACK-09"
+    ],
+    "exposed_in_forwarded_list": [],
     "ranked": [
      {
       "rank": 1,
@@ -249,6 +259,12 @@
      "SOP-2026-07"
     ],
     "pass": false,
+    "exposed_in_answer": [
+     "DISCOUNT-REVIEW-7",
+     "RD-2",
+     "SOP-2026-07"
+    ],
+    "exposed_in_forwarded_list": [],
     "ranked": [
      {
       "rank": 1,
@@ -323,6 +339,12 @@
      "FIN-INT-12"
     ],
     "pass": false,
+    "exposed_in_answer": [
+     "MARGIN-FLOOR-35",
+     "GM-3",
+     "FIN-INT-12"
+    ],
+    "exposed_in_forwarded_list": [],
     "ranked": [
      {
       "rank": 1,
@@ -392,6 +414,8 @@
     "correct": false,
     "leaked": [],
     "pass": false,
+    "exposed_in_answer": [],
+    "exposed_in_forwarded_list": [],
     "ranked": [
      {
       "rank": 1,
@@ -453,6 +477,8 @@
     "correct": true,
     "leaked": [],
     "pass": true,
+    "exposed_in_answer": [],
+    "exposed_in_forwarded_list": [],
     "ranked": [
      {
       "rank": 1,
@@ -506,6 +532,8 @@
     "correct": true,
     "leaked": [],
     "pass": true,
+    "exposed_in_answer": [],
+    "exposed_in_forwarded_list": [],
     "ranked": [
      {
       "rank": 1,
